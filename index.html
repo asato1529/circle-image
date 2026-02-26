@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>TikTok Circle Fullscreen</title>
+
+<style>
+body{
+  margin:0;
+  background:black;
+  color:white;
+  font-family:sans-serif;
+}
+
+.ui{
+  position:relative;
+  z-index:20;
+  display:flex;
+  justify-content:center;
+  gap:8px;
+  padding:8px;
+}
+
+button,input{
+  padding:8px 16px;
+  font-size:14px;
+}
+
+canvas{
+  background:black;
+}
+
+/* フルスクリーン */
+body.fullscreen{
+  margin:0;
+  overflow:hidden;
+}
+
+body.fullscreen canvas{
+  position:fixed;
+  top:0;
+  left:0;
+  width:100vw;
+  height:100vh;
+}
+
+body.fullscreen .ui{
+  display:none;
+}
+</style>
+</head>
+
+<body>
+
+<div class="ui">
+  <input id="picker" type="file" multiple accept="image/*">
+  <button id="start">生成開始</button>
+</div>
+
+<canvas id="c"></canvas>
+
+<script>
+const c = document.getElementById("c");
+const ctx = c.getContext("2d");
+
+/* ===== 画面サイズに合わせる ===== */
+function resizeCanvas(){
+  c.width = window.innerWidth;
+  c.height = window.innerHeight;
+}
+window.addEventListener("resize", resizeCanvas);
+resizeCanvas();
+
+/* ===== パラメータ ===== */
+const MAX = 12;
+const INTERVAL = 60;
+const FINAL_HOLD_FRAMES = 180;
+
+const corners = [
+  {x:-1,y:1},
+  {x:-1,y:-1},
+  {x:1,y:-1},
+  {x:1,y:1}
+];
+
+let raw=[], pool=[];
+let layers=[];
+let frame=0;
+let spawnIndex=0;
+let playing=false;
+let finalTimer=0;
+
+/* ===== 画像読み込み ===== */
+picker.onchange = e => {
+  raw=[];
+  for(const f of e.target.files){
+    const im=new Image();
+    im.src=URL.createObjectURL(f);
+    raw.push(im);
+  }
+
+  pool=[];
+  for(let i=0;i<MAX;i++) pool.push(raw[i%raw.length]);
+
+  layers=[];
+  spawnIndex=0;
+  frame=0;
+  finalTimer=0;
+  playing=false;
+};
+
+/* ===== 描画 ===== */
+function draw(img,x,y,r,imgS,ringS){
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.rotate(r);
+
+  const radius = Math.min(c.width,c.height)*0.4*ringS;
+
+  ctx.beginPath();
+  ctx.arc(0,0,radius,0,Math.PI*2);
+  ctx.clip();
+
+  const sz=Math.min(img.width,img.height);
+  const base=Math.min(c.width,c.height)*imgS;
+
+  ctx.drawImage(
+    img,
+    (img.width-sz)/2,
+    (img.height-sz)/2,
+    sz,sz,
+    -base/2,-base/2,base,base
+  );
+
+  ctx.restore();
+}
+
+/* ===== レイヤー生成 ===== */
+function spawn(){
+  const pos = spawnIndex===0
+    ? {x:0,y:0}
+    : corners[(spawnIndex-1)%corners.length];
+
+  layers.push({
+    img: pool[spawnIndex],
+    t: 0,
+    x: pos.x*c.width*0.6,
+    y: pos.y*c.height*0.6,
+    rot: spawnIndex===0 ? 0 : 1.0,
+    imgScale: 0.45,
+    ringScale: 0.45,
+    final: spawnIndex===MAX-1,
+    stopped: false   // ← 最後専用フラグ
+  });
+
+  spawnIndex++;
+}
+
+/* ===== メインループ ===== */
+function update(){
+  requestAnimationFrame(update);
+  if(!playing) return;
+
+  frame++;
+  if(spawnIndex<MAX && frame%INTERVAL===0) spawn();
+
+  ctx.clearRect(0,0,c.width,c.height);
+
+  layers.forEach(L=>{
+    L.t += 0.015;
+    const p = Math.min(L.t,1);
+
+    const cx = c.width/2  + L.x*(1-p);
+    const cy = c.height/2 + L.y*(1-p);
+
+    L.imgScale  += 0.0025;
+    L.ringScale += 0.004;
+
+    /* ===== 回転処理 ===== */
+    if(L.final){
+
+      // 最後の1枚
+      if(!L.stopped){
+        L.rot -= 0.006;
+
+        // ★ ここで必ず水平に固定
+        if(L.rot <= 0){
+          L.rot = 0;
+          L.stopped = true;
+        }
+
+      }else{
+        // 完全に水平になった後
+        finalTimer++;
+
+        L.imgScale  += 0.003;
+        L.ringScale += 0.006;
+
+      if(finalTimer > FINAL_HOLD_FRAMES){
+  playing = false;
+
+  // ★ 全画面解除
+  document.body.classList.remove("fullscreen");
+}
+}
+
+    }else{
+      // 2〜11枚目
+      L.rot -= 0.006;
+    }
+
+    draw(L.img,cx,cy,L.rot,L.imgScale,L.ringScale);
+  });
+}
+update();
+
+/* ===== 開始 ===== */
+start.onclick = () => {
+  document.body.classList.add("fullscreen");
+
+  layers=[];
+  spawnIndex=0;
+  frame=0;
+  finalTimer=0;
+  playing=true;
+
+  spawn();
+};
+</script>
+
+</body>
+</html>
